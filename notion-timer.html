@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notion Timer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+</style>
+</head>
+<body>
+<div style="padding: 2rem 1rem; max-width: 400px; margin: 0 auto;">
+
+  <div style="text-align: center; margin-bottom: 4px;">
+    <span id="display" style="font-family: 'Courier New', monospace; font-size: 56px; font-weight: 600; color: #1a1a1a; letter-spacing: 3px;">00:00:00</span>
+  </div>
+  <div style="text-align: center; margin-bottom: 14px;">
+    <span id="ms" style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: 400; color: #666;">.000</span>
+  </div>
+
+  <div style="height: 4px; background: #e5e5e5; border-radius: 2px; margin-bottom: 14px; overflow: hidden;">
+    <div id="bar" style="height: 100%; width: 0%; background: #1a1a1a; border-radius: 2px; transition: background 0.4s;"></div>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: #888; margin-bottom: 18px; min-height: 20px;">
+    <div id="dot" style="width: 7px; height: 7px; border-radius: 50%; background: #ccc; flex-shrink: 0;"></div>
+    <span id="status-text">gestopt</span>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px 14px; background: #f7f7f7;">
+    <span style="font-size: 13px; color: #666; white-space: nowrap;">Doeltijd</span>
+    <input id="th" type="number" min="0" max="23" value="0" style="width: 42px; font-family: 'Courier New', monospace; font-size: 15px; font-weight: 600; text-align: center; background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; color: #1a1a1a; padding: 5px 2px; outline: none;">
+    <span style="font-size: 16px; color: #1a1a1a; font-family: 'Courier New', monospace; font-weight: 600;">:</span>
+    <input id="tm" type="number" min="0" max="59" value="25" style="width: 42px; font-family: 'Courier New', monospace; font-size: 15px; font-weight: 600; text-align: center; background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; color: #1a1a1a; padding: 5px 2px; outline: none;">
+    <span style="font-size: 16px; color: #1a1a1a; font-family: 'Courier New', monospace; font-weight: 600;">:</span>
+    <input id="ts" type="number" min="0" max="59" value="0" style="width: 42px; font-family: 'Courier New', monospace; font-size: 15px; font-weight: 600; text-align: center; background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; color: #1a1a1a; padding: 5px 2px; outline: none;">
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 7px; cursor: pointer;" onclick="toggleSound()">
+      <div id="soundSwitch" style="width: 30px; height: 17px; border-radius: 9px; background: #1a1a1a; position: relative; flex-shrink: 0; transition: background 0.2s;">
+        <div id="switchKnob" style="position: absolute; width: 13px; height: 13px; border-radius: 50%; background: white; top: 2px; left: 15px; transition: left 0.2s;"></div>
+      </div>
+      <span style="font-size: 13px; color: #666;">geluid</span>
+    </div>
+  </div>
+
+  <div id="reached" style="display: none; text-align: center; font-size: 13px; font-weight: 600; color: #b45309; margin-bottom: 14px; padding: 8px 12px; border: 1px solid #f59e0b; border-radius: 8px; background: #fffbeb;">Doeltijd bereikt!</div>
+
+  <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 20px;">
+    <button id="startStop" onclick="toggleTimer()" style="font-size: 14px; font-weight: 600; padding: 9px 24px; border-radius: 8px; border: 1.5px solid #1a1a1a; background: #1a1a1a; color: #fff; cursor: pointer; font-family: inherit;">Start</button>
+    <button id="lapBtn" onclick="recordLap()" disabled style="font-size: 14px; font-weight: 500; padding: 9px 24px; border-radius: 8px; border: 1.5px solid #d0d0d0; background: #fff; color: #aaa; cursor: not-allowed; font-family: inherit;">Ronde</button>
+    <button onclick="resetTimer()" style="font-size: 14px; font-weight: 500; padding: 9px 24px; border-radius: 8px; border: 1.5px solid #d0d0d0; background: #fff; color: #333; cursor: pointer; font-family: inherit;">Reset</button>
+  </div>
+
+  <div id="laps" style="display: none; border-top: 1px solid #e5e5e5; padding-top: 12px;">
+    <div id="lap-list"></div>
+  </div>
+</div>
+
+<script>
+let running = false, startTime = 0, elapsed = 0, raf = null;
+let laps = [], lastLapElapsed = 0, goalReached = false, soundOn = true;
+let audioCtx = null;
+
+function getCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function beep(type) {
+  if (!soundOn) return;
+  try {
+    const ctx = getCtx();
+    const configs = type === 'goal'
+      ? [{f:880,t:0,d:0.15},{f:1108,t:0.18,d:0.15},{f:1320,t:0.36,d:0.3}]
+      : type === 'lap' ? [{f:660,t:0,d:0.1}] : [{f:500,t:0,d:0.07}];
+    configs.forEach(({f,t,d}) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = 'sine'; o.frequency.value = f;
+      const now = ctx.currentTime + t;
+      g.gain.setValueAtTime(0.3, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + d);
+      o.start(now); o.stop(now + d + 0.01);
+    });
+  } catch(e) {}
+}
+
+function pad(n) { return String(Math.floor(Math.abs(n))).padStart(2,'0'); }
+
+function format(ms) {
+  const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000), s = Math.floor((ms%60000)/1000);
+  return { hms: pad(h)+':'+pad(m)+':'+pad(s), ms: '.'+String(ms%1000).padStart(3,'0') };
+}
+
+function getGoalMs() {
+  const h = parseInt(document.getElementById('th').value)||0;
+  const m = parseInt(document.getElementById('tm').value)||0;
+  const s = parseInt(document.getElementById('ts').value)||0;
+  return (h*3600 + m*60 + s)*1000;
+}
+
+function tick() {
+  elapsed = Date.now() - startTime;
+  const f = format(elapsed);
+  document.getElementById('display').textContent = f.hms;
+  document.getElementById('ms').textContent = f.ms;
+  const goal = getGoalMs();
+  if (goal > 0) {
+    const pct = Math.min(100, (elapsed/goal)*100);
+    const bar = document.getElementById('bar');
+    bar.style.width = pct + '%';
+    bar.style.background = pct >= 100 ? '#f59e0b' : pct >= 80 ? '#22c55e' : '#1a1a1a';
+    if (elapsed >= goal && !goalReached) {
+      goalReached = true;
+      beep('goal');
+      document.getElementById('reached').style.display = 'block';
+      document.getElementById('dot').style.background = '#f59e0b';
+      document.getElementById('status-text').textContent = 'doeltijd bereikt';
+    }
+  }
+  raf = requestAnimationFrame(tick);
+}
+
+function toggleTimer() {
+  const btn = document.getElementById('startStop');
+  const lap = document.getElementById('lapBtn');
+  if (!running) {
+    startTime = Date.now() - elapsed;
+    running = true;
+    beep('start');
+    tick();
+    btn.textContent = 'Stop';
+    lap.disabled = false;
+    lap.style.color = '#333'; lap.style.borderColor = '#1a1a1a'; lap.style.cursor = 'pointer';
+    document.getElementById('dot').style.background = '#22c55e';
+    document.getElementById('status-text').textContent = 'loopt';
+    ['th','tm','ts'].forEach(id => document.getElementById(id).disabled = true);
+  } else {
+    cancelAnimationFrame(raf); running = false;
+    beep('stop');
+    btn.textContent = 'Hervat';
+    lap.disabled = true;
+    lap.style.color = '#aaa'; lap.style.borderColor = '#d0d0d0'; lap.style.cursor = 'not-allowed';
+    if (!goalReached) {
+      document.getElementById('dot').style.background = '#ccc';
+      document.getElementById('status-text').textContent = 'gepauzeerd';
+    }
+  }
+}
+
+function resetTimer() {
+  cancelAnimationFrame(raf);
+  running = false; elapsed = 0; lastLapElapsed = 0; laps = []; goalReached = false;
+  document.getElementById('display').textContent = '00:00:00';
+  document.getElementById('ms').textContent = '.000';
+  const btn = document.getElementById('startStop');
+  btn.textContent = 'Start'; btn.style.background = '#1a1a1a'; btn.style.color = '#fff'; btn.style.borderColor = '#1a1a1a';
+  const lap = document.getElementById('lapBtn');
+  lap.disabled = true; lap.style.color = '#aaa'; lap.style.borderColor = '#d0d0d0'; lap.style.cursor = 'not-allowed';
+  document.getElementById('dot').style.background = '#ccc';
+  document.getElementById('status-text').textContent = 'gestopt';
+  document.getElementById('laps').style.display = 'none';
+  document.getElementById('lap-list').innerHTML = '';
+  document.getElementById('reached').style.display = 'none';
+  const bar = document.getElementById('bar'); bar.style.width = '0%'; bar.style.background = '#1a1a1a';
+  ['th','tm','ts'].forEach(id => { document.getElementById(id).disabled = false; });
+}
+
+function recordLap() {
+  const delta = elapsed - lastLapElapsed;
+  laps.push({ total: elapsed, delta });
+  lastLapElapsed = elapsed;
+  beep('lap');
+  const list = document.getElementById('lap-list');
+  list.innerHTML = '';
+  [...laps].reverse().forEach((lap, i) => {
+    const num = laps.length - i;
+    const ft = format(lap.total), fd = format(lap.delta);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px;border-bottom:1px solid #e5e5e5;';
+    row.innerHTML = '<span style="color:#888">Ronde '+num+'</span>'
+      + '<span style="font-family:\'Courier New\',monospace;font-size:12px;color:#aaa">+'+fd.hms+'</span>'
+      + '<span style="font-family:\'Courier New\',monospace;color:#1a1a1a;font-weight:600">'+ft.hms+'</span>';
+    list.appendChild(row);
+  });
+  document.getElementById('laps').style.display = 'block';
+}
+
+function toggleSound() {
+  soundOn = !soundOn;
+  document.getElementById('soundSwitch').style.background = soundOn ? '#1a1a1a' : '#ccc';
+  document.getElementById('switchKnob').style.left = soundOn ? '15px' : '2px';
+}
+</script>
+</body>
+</html>
